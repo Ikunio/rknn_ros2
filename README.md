@@ -22,17 +22,21 @@
 根据 RK3588S 用户手册配置 NPU 运行环境。
 
 ### 3. 克隆仓库
+```bsah
 git clone https://github.com/Ikunio/rknn_ros2.git
-
+```
 ### 4. 编译
-在工作空间终端输入colcon build
-
+```bash
+colcon build
+```
 ### 5. source
+```bash
 source install/setup.bash
-
+```
 ### 6. 运行
+```bash
 ros2 run rknn_ros2 rknn_ros_test
-
+```
 
 
 # RKNN ROS2 节点配置指南
