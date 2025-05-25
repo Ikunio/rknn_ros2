@@ -21,61 +21,6 @@ CLASSES = ("apple")
 # def sigmoid(x):
 #     return 1 / (1 + np.exp(-x))
 
-class ImageSubscriber(Node):
-    def __init__(self, topic_name):
-        super().__init__('image_subscriber')
-        self.bridge = CvBridge()
-        self.current_frame = None
-        self.subscription = self.create_subscription(
-            Image,
-            topic_name,
-            self.image_callback,
-            10)  # 10 is the queue size
-
-    def image_callback(self, msg):
-        try:
-            # Convert ROS Image message to OpenCV image in BGR format
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            self.current_frame = cv_image
-        except Exception as e:
-            self.get_logger().error(f'Failed to convert image: {e}')
-
-def get_image_frame(topic_name='/camera/image_raw', timeout=5.0):
-    """
-    订阅ROS2图像话题并返回BGR格式的frame
-    
-    参数:
-        topic_name (str): 要订阅的图像话题名称
-        timeout (float): 等待图像的最大时间(秒)
-    
-    返回:
-        numpy.ndarray: BGR格式的图像帧，如果超时或出错则返回None
-    """
-    rclpy.init()
-    node = ImageSubscriber(topic_name)
-    
-    start_time = node.get_clock().now().seconds_nanoseconds()[0]
-    
-    while rclpy.ok():
-        rclpy.spin_once(node, timeout_sec=0.1)
-        
-        if node.current_frame is not None:
-            frame = node.current_frame
-            node.destroy_node()
-            rclpy.shutdown()
-            return frame
-        
-        current_time = node.get_clock().now().seconds_nanoseconds()[0]
-        if current_time - start_time > timeout:
-            node.get_logger().warn(f'Timeout while waiting for image on topic {topic_name}')
-            node.destroy_node()
-            rclpy.shutdown()
-            return None
-    
-    node.destroy_node()
-    rclpy.shutdown()
-    return None
-
 def xywh2xyxy(x):
     # Convert [x, y, w, h] to [x1, y1, x2, y2]
     y = np.copy(x)
@@ -278,24 +223,59 @@ class ImageSubscriber(Node):
         with self.lock:
             return self.latest_frame.copy() if self.latest_frame is not None else None
 
-def get_image_frame(topic_name):
-    # Initialize ROS2 if not already initialized
-    if not rclpy.ok():
+# 修改get_image_frame函数，避免重复初始化ROS2
+def get_image_frame(topic_name, timeout=5.0):
+    """
+    订阅ROS2图像话题并返回BGR格式的frame
+    
+    参数:
+        topic_name (str): 要订阅的图像话题名称
+        timeout (float): 等待图像的最大时间(秒)
+    
+    返回:
+        numpy.ndarray: BGR格式的图像帧，如果超时或出错则返回None
+    """
+    # 检查ROS2是否已经初始化，避免重复初始化
+    ros_initialized = rclpy.ok()
+    if not ros_initialized:
         rclpy.init()
     
-    # Create a single subscriber instance (could be made more efficient)
+    # 创建订阅者节点
     image_subscriber = ImageSubscriber(topic_name)
     
-    # Spin once to get the latest image
-    rclpy.spin_once(image_subscriber, timeout_sec=0.1)
+    # 设置超时
+    start_time = image_subscriber.get_clock().now().seconds_nanoseconds()[0]
     
-    frame = image_subscriber.get_latest_frame()
+    # 等待接收图像
+    while rclpy.ok():
+        rclpy.spin_once(image_subscriber, timeout_sec=0.1)
+        
+        # 检查是否接收到图像
+        frame = image_subscriber.get_latest_frame()
+        if frame is not None:
+            image_subscriber.destroy_node()
+            # 只有当我们自己初始化ROS2时才关闭它
+            if not ros_initialized:
+                rclpy.shutdown()
+            return frame
+        
+        # 检查是否超时
+        current_time = image_subscriber.get_clock().now().seconds_nanoseconds()[0]
+        if current_time - start_time > timeout:
+            image_subscriber.get_logger().warn(f'Timeout while waiting for image on topic {topic_name}')
+            image_subscriber.destroy_node()
+            # 只有当我们自己初始化ROS2时才关闭它
+            if not ros_initialized:
+                rclpy.shutdown()
+            return None
+    
+    # 如果ROS2关闭，清理并返回None
     image_subscriber.destroy_node()
-    
-    if frame is None:
-        raise ValueError("No frame received from topic {}".format(topic_name))
-    
-    return frame
+    # 只有当我们自己初始化ROS2时才关闭它
+    if not ros_initialized:
+        rclpy.shutdown()
+    return None
+
 
 def main(args=None):
     rclpy.init(args=args)
